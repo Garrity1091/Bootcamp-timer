@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#111111" />
+<title>Bootcamp Interval Timer</title>
+<style>
+  :root{
+    --bg:#0f0f10; --card:#1a1a1d; --text:#ffffff; --muted:#b9bbc2;
+    --work:#1f8f4e; --rest:#b46a12; --accent:#ffffff; --border:#2b2c31;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  body{min-height:100vh;display:flex;justify-content:center}
+  .app{width:min(760px,100%);padding:20px 16px calc(28px + env(safe-area-inset-bottom))}
+  h1{font-size:28px;margin:0 0 6px}
+  .sub{color:var(--muted);margin-bottom:18px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;margin-bottom:14px}
+  .settings{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em}
+  input{width:100%;font-size:22px;padding:12px;border-radius:12px;border:1px solid var(--border);background:#111216;color:#fff;text-align:center}
+  .phase{text-align:center;font-weight:800;font-size:18px;letter-spacing:.12em;margin-bottom:4px}
+  .timer{text-align:center;font-size:76px;line-height:1;font-weight:900;font-variant-numeric:tabular-nums;margin:16px 0}
+  .round{text-align:center;color:var(--muted);font-size:18px}
+  .bar{height:10px;border-radius:999px;background:#2a2b30;overflow:hidden;margin-top:16px}
+  .bar > div{height:100%;width:100%;background:var(--work);transition:width .2s linear, background .2s}
+  .buttons{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-top:14px}
+  button{border:0;border-radius:14px;padding:16px;font-size:17px;font-weight:800;background:#2b2d33;color:#fff}
+  #start{background:#ffffff;color:#111}
+  .toggles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+  .toggle{display:flex;align-items:center;justify-content:space-between;background:#111216;border:1px solid var(--border);padding:12px 14px;border-radius:12px}
+  .toggle input{width:auto;transform:scale(1.3)}
+  .note{font-size:14px;color:var(--muted);line-height:1.4}
+  .status{min-height:24px;text-align:center;font-size:14px;color:var(--muted);margin-top:8px}
+  @media(max-width:520px){
+    .timer{font-size:64px}
+    .settings{grid-template-columns:1fr 1fr 1fr}
+    .buttons{grid-template-columns:1fr 1fr;}.buttons #start{grid-column:1/-1}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Bootcamp Interval Timer</h1>
+  <div class="sub">Set it, hit start, and let the countdown run your station.</div>
+
+  <div class="card">
+    <div class="settings">
+      <div><label>Work (sec)</label><input id="work" type="number" min="1" max="3600" value="50"></div>
+      <div><label>Rest (sec)</label><input id="rest" type="number" min="0" max="3600" value="10"></div>
+      <div><label>Rounds</label><input id="rounds" type="number" min="1" max="99" value="4"></div>
+    </div>
+    <div class="toggles">
+      <div class="toggle"><span>Voice cues</span><input id="voice" type="checkbox" checked></div>
+      <div class="toggle"><span>Vibrate</span><input id="vibrate" type="checkbox" checked></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="phase" class="phase">READY</div>
+    <div id="timer" class="timer">00:50</div>
+    <div id="round" class="round">Round 1 of 4</div>
+    <div class="bar"><div id="progress"></div></div>
+    <div id="status" class="status"></div>
+
+    <div class="buttons">
+      <button id="start">START</button>
+      <button id="pause">PAUSE</button>
+      <button id="reset">RESET</button>
+    </div>
+  </div>
+
+  <div class="card note">
+    Tip: start Pandora/Apple Music first, then return here and tap START. Keep this page open in the foreground for the most reliable spoken cues on iPhone/iPad.
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const workEl=$('work'), restEl=$('rest'), roundsEl=$('rounds');
+  const voiceEl=$('voice'), vibrateEl=$('vibrate');
+  const phaseEl=$('phase'), timerEl=$('timer'), roundEl=$('round'), progressEl=$('progress'), statusEl=$('status');
+  const startBtn=$('start'), pauseBtn=$('pause'), resetBtn=$('reset');
+
+  let state='ready', currentRound=1, remaining=50, phaseTotal=50;
+  let timer=null, paused=false, lastSpoken=null;
+
+  function clampInt(el, fallback){
+    let v=parseInt(el.value,10);
+    if(!Number.isFinite(v) || v < 0) v=fallback;
+    return v;
+  }
+  function fmt(s){
+    s=Math.max(0,Math.ceil(s));
+    const m=Math.floor(s/60), sec=s%60;
+    return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  }
+  function speak(text){
+    if(!voiceEl.checked || !('speechSynthesis' in window)) return;
+    try{
+      speechSynthesis.cancel();
+      const u=new SpeechSynthesisUtterance(text);
+      u.rate=1.0; u.pitch=1.0; u.volume=1.0;
+      speechSynthesis.speak(u);
+    }catch(e){}
+  }
+  function buzz(pattern=80){
+    if(vibrateEl.checked && navigator.vibrate) navigator.vibrate(pattern);
+  }
+  function render(){
+    timerEl.textContent=fmt(remaining);
+    roundEl.textContent=`Round ${currentRound} of ${clampInt(roundsEl,4)}`;
+    const pct=phaseTotal>0 ? Math.max(0,Math.min(100,(remaining/phaseTotal)*100)) : 0;
+    progressEl.style.width=pct+'%';
+    progressEl.style.background = state==='rest' ? 'var(--rest)' : 'var(--work)';
+    phaseEl.textContent = state==='work' ? 'WORK' : state==='rest' ? 'REST' : state==='done' ? 'DONE' : 'READY';
+  }
+  function loadReady(){
+    clearInterval(timer); timer=null; paused=false; state='ready'; currentRound=1;
+    remaining=clampInt(workEl,50); phaseTotal=remaining; lastSpoken=null; statusEl.textContent='';
+    startBtn.textContent='START'; render();
+  }
+  function transition(){
+    const work=clampInt(workEl,50), rest=clampInt(restEl,10), rounds=clampInt(roundsEl,4);
+
+    if(state==='work'){
+      if(currentRound>=rounds){
+        state='done'; remaining=0; phaseTotal=1; render();
+        buzz([120,80,120,80,180]); speak('Workout complete');
+        statusEl.textContent='Workout complete';
+        clearInterval(timer); timer=null; startBtn.textContent='START AGAIN';
+        return;
+      }
+      state='rest'; remaining=rest; phaseTotal=Math.max(1,rest); lastSpoken=null;
+      buzz(120); speak('Rest'); render();
+      if(rest===0) transition();
+    } else if(state==='rest'){
+      currentRound++;
+      state='work'; remaining=work; phaseTotal=work; lastSpoken=null;
+      buzz(160);
+      const roundsTotal=clampInt(roundsEl,4);
+      speak(currentRound===roundsTotal ? `Go. Final round` : `Go. Round ${currentRound}`);
+      render();
+    }
+  }
+  function tick(){
+    if(paused || state==='ready' || state==='done') return;
+    remaining -= 1;
+    if(remaining <= 5 && remaining > 0 && lastSpoken !== remaining){
+      lastSpoken=remaining; speak(String(remaining));
+    }
+    if(remaining <= 0){ remaining=0; render(); transition(); return; }
+    render();
+  }
+  function start(){
+    if(state==='done'){ loadReady(); }
+    if(state==='ready'){
+      const work=clampInt(workEl,50);
+      if(work<1){statusEl.textContent='Work time must be at least 1 second.';return;}
+      state='work'; currentRound=1; remaining=work; phaseTotal=work; lastSpoken=null;
+      speak(`Go. Round 1`); buzz(160);
+    }
+    paused=false; startBtn.textContent='RUNNING'; statusEl.textContent='';
+    if(!timer) timer=setInterval(tick,1000);
+    render();
+  }
+  function pause(){
+    if(state==='ready' || state==='done') return;
+    paused=!paused;
+    pauseBtn.textContent=paused?'RESUME':'PAUSE';
+    statusEl.textContent=paused?'Paused':'';
+  }
+
+  startBtn.addEventListener('click', start);
+  pauseBtn.addEventListener('click', pause);
+  resetBtn.addEventListener('click', loadReady);
+  [workEl,restEl,roundsEl].forEach(el=>el.addEventListener('change',()=>{ if(state==='ready') loadReady(); }));
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden && state!=='ready' && state!=='done') statusEl.textContent='Keep this page open for best timer reliability.';
+  });
+
+  loadReady();
+})();
+</script>
+</body>
+</html>
